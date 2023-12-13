@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,8 +27,35 @@ func main() {
 
 	fmt.Println("Compatible ChromeDriver Version:", chromeDriverVersion)
 
-	downloadURL := fmt.Sprintf("https://chromedriver.storage.googleapis.com/%s/chromedriver_win32.zip", chromeDriverVersion)
-	downloadChromeDriver(downloadURL, "chromedriver_win32.zip")
+	downloadURL := chromeDriverVersion
+	downloadChromeDriver(downloadURL, "driver/chromedriver.zip")
+	unzip("driver/chromedriver.zip", "driver")
+}
+
+func unzip(src, dst string) (fp *os.File, err error) {
+	zipFp, err := zip.OpenReader(src)
+	if err != nil {
+		return nil, err
+	}
+	fp, err = os.Create(dst)
+	if err != nil {
+		return nil, err
+	}
+	defer fp.Close()
+
+	for _, zfp := range zipFp.File {
+		zp, err := zfp.Open()
+		if err != nil {
+			return nil, err
+		}
+		zipByte, err := io.ReadAll(zp)
+		zp.Close()
+		if err != nil {
+			return nil, nil
+		}
+		fp.Write(zipByte)
+	}
+	return nil, nil
 }
 
 func getInstalledChromeVersion() (string, error) {
@@ -50,7 +78,7 @@ func getInstalledChromeVersion() (string, error) {
 func getChromeDriverVersion(chromeVersion string) (string, error) {
 	// Chromeのメジャーバージョンに基づいてChromeDriverのバージョンを取得
 	majorVersion := strings.Split(chromeVersion, ".")[0]
-	majorVersionInt, err := strconv.Atoi(majorVersionInt)
+	majorVersionInt, err := strconv.Atoi(majorVersion)
 	if err != nil {
 		return "", err
 	}
@@ -77,7 +105,11 @@ func getChromeDriverVersion(chromeVersion string) (string, error) {
 		}
 		downloads := chromeDriverData.Milestones[majorVersion].Downloads
 		for index, cd := range downloads.ChromeDriver {
-			fmt.Println(index, cd)
+			cp := cd.Platform
+			if strings.HasPrefix(cp, "win") || strings.HasPrefix(cp, "mac") || strings.HasPrefix(cp, "linux") {
+				fmt.Println(index, cd)
+				return cd.URL, nil
+			}
 		}
 	}
 

@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -17,9 +21,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-
 	fmt.Println("Detected Chrome Version:", chromeVersion)
-
 	chromeDriverVersion, err := getChromeDriverVersion(chromeVersion)
 	if err != nil {
 		panic(err)
@@ -28,34 +30,85 @@ func main() {
 	fmt.Println("Compatible ChromeDriver Version:", chromeDriverVersion)
 
 	downloadURL := chromeDriverVersion
-	downloadChromeDriver(downloadURL, "driver/chromedriver.zip")
-	unzip("driver/chromedriver.zip", "driver")
+	downloadChromeDriver(downloadURL, "driver"+string(os.PathSeparator)+"chromedriver.zip")
+	if err := unzip("driver"+string(os.PathSeparator)+"chromedriver.zip", "driver"); err != nil {
+		log.Fatalln(err)
+	}
+	const driverPATH = "driver" + string(os.PathSeparator) + "chromedriver"
+	filepath.WalkDir(driverPATH, func(path string, d fs.DirEntry, err error) error {
+		fmt.Println(path)
+		dst, err := os.Create(path)
+		if err != nil {
+			return err
+		}
+		src, err := os.Open(driverPATH)
+		if err != nil {
+			return err
+		}
+		io.Copy(dst, src)
+
+		return nil
+	})
+
+	os.Remove("driver/chromedriver.zip")
 }
 
-func unzip(src, dst string) (fp *os.File, err error) {
-	zipFp, err := zip.OpenReader(src)
+// unZip zipファイルを展開する
+func unzip(src, dest string) error {
+	r, err := zip.OpenReader(src)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	fp, err = os.Create(dst)
-	if err != nil {
-		return nil, err
-	}
-	defer fp.Close()
+	defer r.Close()
 
-	for _, zfp := range zipFp.File {
-		zp, err := zfp.Open()
-		if err != nil {
-			return nil, err
-		}
-		zipByte, err := io.ReadAll(zp)
-		zp.Close()
-		if err != nil {
-			return nil, nil
-		}
-		fp.Write(zipByte)
+	ext := filepath.Ext(src)
+	rep := regexp.MustCompile(ext + "$")
+	dir := filepath.Base(rep.ReplaceAllString(src, ""))
+
+	destDir := filepath.Join(dest, dir)
+	// ファイル名のディレクトリを作成する
+	if err := os.MkdirAll(destDir, os.ModeDir); err != nil {
+		return err
 	}
-	return nil, nil
+
+	for _, f := range r.File {
+		if f.Mode().IsDir() {
+			// ディレクトリは無視して構わない
+			continue
+		}
+		if err := saveUnZipFile(destDir, *f); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// saveUnZipFile 展開したZipファイルをそのままローカルに保存する
+func saveUnZipFile(destDir string, f zip.File) error {
+	// 展開先のパスを設定する
+	destPath := filepath.Join(destDir, f.Name)
+	// 子孫ディレクトリがあれば作成する
+	if err := os.MkdirAll(filepath.Dir(destPath), f.Mode()); err != nil {
+		return err
+	}
+	// Zipファイルを開く
+	rc, err := f.Open()
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	// 展開先ファイルを作成する
+	destFile, err := os.Create(destPath)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+	// 展開先ファイルに書き込む
+	if _, err := io.Copy(destFile, rc); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func getInstalledChromeVersion() (string, error) {
@@ -104,10 +157,16 @@ func getChromeDriverVersion(chromeVersion string) (string, error) {
 			return "", err
 		}
 		downloads := chromeDriverData.Milestones[majorVersion].Downloads
+
+		fmt.Println(downloads.ChromeDriver)
 		for index, cd := range downloads.ChromeDriver {
 			cp := cd.Platform
-			if strings.HasPrefix(cp, "win") || strings.HasPrefix(cp, "mac") || strings.HasPrefix(cp, "linux") {
-				fmt.Println(index, cd)
+			fmt.Println(index, cd)
+			if strings.HasPrefix(cp, getOSKey()) {
+				return cd.URL, nil
+			} else if strings.HasPrefix(cp, getOSKey()) {
+				return cd.URL, nil
+			} else if strings.HasPrefix(cp, getOSKey()) {
 				return cd.URL, nil
 			}
 		}

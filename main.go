@@ -30,26 +30,24 @@ func main() {
 	fmt.Println("Compatible ChromeDriver Version:", chromeDriverVersion)
 
 	downloadURL := chromeDriverVersion
-	downloadChromeDriver(downloadURL, "driver"+string(os.PathSeparator)+"chromedriver.zip")
-	if err := unzip("driver"+string(os.PathSeparator)+"chromedriver.zip", "driver"); err != nil {
+	driverDir := "driver" + string(os.PathSeparator)
+	downloadChromeDriver(downloadURL, driverDir+"chromedriver.zip")
+	if err := unzip(driverDir+"chromedriver.zip", "driver"); err != nil {
 		log.Fatalln(err)
 	}
-	const driverPATH = "driver" + string(os.PathSeparator) + "chromedriver"
-	filepath.WalkDir(driverPATH, func(path string, d fs.DirEntry, err error) error {
-		fmt.Println(path)
-		dst, err := os.Create(path)
-		if err != nil {
-			return err
+	newDriver, err := os.Create(driverDir + "chromedriver.exe")
+	filepath.WalkDir(driverDir, func(path string, d fs.DirEntry, err error) error {
+		if strings.EqualFold(filepath.Base(path), "chromedriver.exe") {
+			driverFp, err := os.Open(path)
+			if err != nil {
+				return filepath.SkipDir
+			}
+			io.Copy(newDriver, driverFp)
+			os.Remove(driverDir + "chromedriver")
+			return filepath.SkipAll
 		}
-		src, err := os.Open(driverPATH)
-		if err != nil {
-			return err
-		}
-		io.Copy(dst, src)
-
 		return nil
 	})
-
 	os.Remove("driver/chromedriver.zip")
 }
 
